@@ -1,5 +1,7 @@
 {% extends "base.html" %} {% block title %}Synthia | Results{% endblock %} {%
 block content %}
+<!-- Results page content is hidden from output for now -->
+<div class="hidden-page" style="display:none;">
 <section class="hero compact" data-animate="rise">
   <p class="eyebrow">Latest Generation Run</p>
   <h1 class="page-title">Results Dashboard</h1>
@@ -262,5 +264,6 @@ block content %}
     >View All Datasets</a
   >
   <a href="{{ url_for('index') }}" class="btn btn-primary">Generate Again</a>
+</div>
 </div>
 {% endblock %}
