@@ -46,6 +46,15 @@ report_generator = ReportGenerator()
 _latest_run = {}
 _run_lock = threading.Lock()
 
+# Keep trained generators in memory so they are reused
+_generator_cache = {}
+# Directory for persisted trained models
+MODEL_CACHE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "data",
+    "models"
+)
+os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
 
 def _get_data():
     """Load training and test data, creating sample if needed."""
@@ -103,8 +112,85 @@ def generate():
         hyperparameters={'epochs': epochs, 'batch_size': batch_size},
         disease_condition=disease,
     )
-    generator = SyntheticDataGenerator(config=config)
-    generator.train(train_data, config=config)
+    # Create a unique key for the model configuration
+    generator_key = (
+        model_type,
+        disease,
+        seed,
+        epochs,
+        batch_size,
+        len(train_data)
+    )
+
+    # Create a safe filename for the persisted model
+    model_filename = "_".join(str(x) for x in generator_key)
+    model_filename = "".join(
+        c if c.isalnum() or c in "._-" else "_"
+        for c in model_filename
+    )
+    model_path = os.path.join(
+        MODEL_CACHE_DIR,
+        f"{model_filename}.pkl"
+    )
+
+    # 1. Reuse model already loaded in memory
+    if generator_key in _generator_cache:
+        print("[i] Reusing existing trained model from memory. Skipping training.")
+        generator = _generator_cache[generator_key]
+
+    # 2. Otherwise, try loading the trained model from disk
+    elif os.path.exists(model_path):
+        print("[i] Saved model found. Loading model. Skipping training...")
+
+        generator = SyntheticDataGenerator(config=config)
+
+        try:
+            if model_type == 'CTGAN':
+                from src.engines.ctgan_engine import CTGANEngine
+
+                engine = CTGANEngine()
+                engine.load_model(model_path)
+                generator.model = engine
+                generator.model_type = model_type
+                generator.training_data = train_data.copy()
+
+            elif model_type == 'TVAE':
+                from src.engines.tvae_engine import TVAEEngine
+
+                engine = TVAEEngine()
+                engine.load_model(model_path)
+                generator.model = engine
+                generator.model_type = model_type
+                generator.training_data = train_data.copy()
+
+            _generator_cache[generator_key] = generator
+
+            print("[+] Saved model loaded successfully.")
+
+        except Exception as e:
+            print(f"[!] Could not load saved model: {e}")
+            print("[i] Training a new model...")
+
+            generator = SyntheticDataGenerator(config=config)
+            generator.train(train_data, config=config)
+            generator.save_model(model_path)
+            _generator_cache[generator_key] = generator
+
+    # 3. No saved model → train once and save it
+    else:
+        print("[i] No trained model found. Training...")
+
+        generator = SyntheticDataGenerator(config=config)
+        generator.train(train_data, config=config)
+
+        print("[i] Saving trained model...")
+        generator.save_model(model_path)
+
+        _generator_cache[generator_key] = generator
+
+        print("[+] Model saved for future runs.")
+
+    # Generate using the trained model
     synthetic = generator.generate(n_samples=n_samples)
 
     # Validation
